@@ -305,8 +305,10 @@ document.addEventListener('DOMContentLoaded', function() {
     function loadClassStudents(className) {
         const baseStudents = classData[className];
         
-        const savedAttendanceKey = `attendance_${selectedClass}_${JSON.parse(localStorage.getItem('attendanceSubject')).code}`;
-        const savedAttendance = JSON.parse(localStorage.getItem(savedAttendanceKey) || '{}');
+        // Check if we should load saved attendance
+        // We'll NOT load previous attendance - always start fresh
+        // If you want to keep for current session, remove this line
+        const savedAttendance = {}; // Always start with empty attendance
         
         students = baseStudents.map((student, index) => {
             const nameParts = student.name.split(' ');
@@ -318,7 +320,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 enrollmentNo: student.enrollmentNo,
                 name: student.name,
                 classDivision: `BSc IT ${className}`,
-                attendance: savedAttendance[student.enrollmentNo] || null,
+                attendance: null, // Always start with null (no attendance marked)
                 initials: initials
             };
         });
@@ -330,7 +332,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     function saveClassAttendance() {
-        const attendanceKey = `attendance_${selectedClass}_${JSON.parse(localStorage.getItem('attendanceSubject')).code}`;
+        // This saves temporary attendance during the session
+        const attendanceKey = `attendance_${selectedClass}_${JSON.parse(localStorage.getItem('attendanceSubject')).code}_temp`;
         const attendanceData = {};
         
         students.forEach(student => {
@@ -417,6 +420,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 filteredStudents[filteredIndex].attendance = isPresent;
             }
             
+            // Save temporary attendance during session
             saveClassAttendance();
             
             renderStudentTable();
@@ -478,14 +482,26 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         
         backBtn.addEventListener('click', function() {
-            localStorage.removeItem('attendanceLoggedIn');
-            localStorage.removeItem('attendanceUsername');
-            localStorage.removeItem('attendanceSubject');
-            localStorage.removeItem('attendanceTimeSlot');
-            localStorage.removeItem('attendanceDate');
-            localStorage.removeItem('selectedClass');
-            
+            // Clear all temporary data
+            clearTemporaryData();
             window.location.href = "index.html";
+        });
+    }
+    
+    function clearTemporaryData() {
+        // Clear temporary attendance data
+        localStorage.removeItem('attendanceLoggedIn');
+        localStorage.removeItem('attendanceUsername');
+        localStorage.removeItem('attendanceSubject');
+        localStorage.removeItem('attendanceTimeSlot');
+        localStorage.removeItem('attendanceDate');
+        localStorage.removeItem('selectedClass');
+        
+        // Clear all temporary attendance keys
+        Object.keys(localStorage).forEach(key => {
+            if (key.includes('_temp')) {
+                localStorage.removeItem(key);
+            }
         });
     }
     
@@ -495,13 +511,20 @@ document.addEventListener('DOMContentLoaded', function() {
         saveAttendanceBtn.disabled = true;
         
         setTimeout(() => {
+            const subject = JSON.parse(localStorage.getItem('attendanceSubject'));
+            const timeSlot = JSON.parse(localStorage.getItem('attendanceTimeSlot'));
+            
             const attendanceRecord = {
                 id: Date.now(),
-                subject: JSON.parse(localStorage.getItem('attendanceSubject')),
-                timeSlot: JSON.parse(localStorage.getItem('attendanceTimeSlot')),
+                subject: subject,
+                timeSlot: timeSlot,
                 date: new Date().toISOString(),
                 class: selectedClass,
-                students: students,
+                students: students.map(student => ({
+                    name: student.name,
+                    enrollmentNo: student.enrollmentNo,
+                    status: student.attendance === true ? 'Present' : 'Absent'
+                })),
                 summary: {
                     total: students.length,
                     present: students.filter(s => s.attendance === true).length,
@@ -516,29 +539,108 @@ document.addEventListener('DOMContentLoaded', function() {
                 );
             }
             
+            // Save to attendance records
             let attendanceRecords = JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
-            
             attendanceRecords.push(attendanceRecord);
-            
             localStorage.setItem('attendanceRecords', JSON.stringify(attendanceRecords));
             
-            showAlert('Attendance saved successfully! Redirecting to login...', 'success');
+            showAlert('Attendance saved successfully!', 'success');
             
-            saveAttendanceBtn.innerHTML = originalText;
+            // Clear temporary data for next session
+            clearTemporaryData();
+            
+            // Reset UI for next attendance
+            resetAttendanceSheet();
+            
+            saveAttendanceBtn.innerHTML = '<i class="fas fa-save"></i> Save Attendance';
             saveAttendanceBtn.disabled = true;
             
-            localStorage.removeItem('attendanceLoggedIn');
-            localStorage.removeItem('attendanceUsername');
-            localStorage.removeItem('attendanceSubject');
-            localStorage.removeItem('attendanceTimeSlot');
-            localStorage.removeItem('attendanceDate');
-            localStorage.removeItem('selectedClass');
-            
-            setTimeout(() => {
-                window.location.href = "index.html";
-            }, 2000);
+            // Show option to take next attendance or go back
+            showNextAttendanceOptions();
             
         }, 1500);
+    }
+    
+    function resetAttendanceSheet() {
+        // Reset student attendance to null
+        students.forEach(student => {
+            student.attendance = null;
+        });
+        
+        filteredStudents = [...students];
+        
+        // Update statistics
+        updateStatistics();
+        
+        // Clear search
+        searchInput.value = '';
+        
+        // Re-render table
+        renderStudentTable();
+        
+        // Clear selected class
+        selectedClass = null;
+        classButtons.forEach(btn => btn.classList.remove('active'));
+        
+        // Disable search
+        searchInput.disabled = true;
+        searchInput.placeholder = 'Please select a class to view students';
+        
+        // Reset table message
+        studentTableBody.innerHTML = `
+            <tr>
+                <td colspan="6" class="text-center py-4">
+                    <div class="text-muted">Please select a class to view students</div>
+                </td>
+            </tr>
+        `;
+    }
+    
+    function showNextAttendanceOptions() {
+        // Create a modal or alert with options
+        const modalHtml = `
+            <div class="alert alert-success" style="display: flex; flex-direction: column; gap: 15px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <i class="fas fa-check-circle" style="font-size: 1.2rem;"></i>
+                    <span style="font-weight: 600;">Attendance saved successfully!</span>
+                </div>
+                <div style="font-size: 0.95rem;">
+                    What would you like to do next?
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button id="take-next-btn" class="btn" style="background: var(--primary-blue); color: white;">
+                        <i class="fas fa-clipboard-list"></i> Take Next Attendance
+                    </button>
+                    <button id="go-home-btn" class="btn" style="background: var(--medium-gray); color: white;">
+                        <i class="fas fa-home"></i> Return to Home
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // Replace the alert div with options
+        alertDiv.innerHTML = modalHtml;
+        alertDiv.style.display = 'flex';
+        alertDiv.style.flexDirection = 'column';
+        
+        // Add event listeners to new buttons
+        document.getElementById('take-next-btn').addEventListener('click', function() {
+            // Keep user logged in, clear only temporary data
+            const username = localStorage.getItem('attendanceUsername');
+            localStorage.clear();
+            
+            // Re-set login for next attendance
+            localStorage.setItem('attendanceLoggedIn', 'true');
+            localStorage.setItem('attendanceUsername', username);
+            localStorage.setItem('attendanceDate', new Date().toISOString());
+            
+            window.location.href = "subject.html";
+        });
+        
+        document.getElementById('go-home-btn').addEventListener('click', function() {
+            clearTemporaryData();
+            window.location.href = "index.html";
+        });
     }
     
     function showAlert(message, type = 'info') {
